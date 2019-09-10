@@ -271,7 +271,7 @@ for method in regression_methods:
         regression_model = RandomForestRegressor(n_estimators=random_forest_number_of_trees, max_features=int(
             max(math.ceil(x_train.shape[1] * optimal_random_forest_x_variables_rate), 1)), oob_score=True)
     elif method == 'gp':  # Gaussian process
-        regression_model = GaussianProcessRegressor(ConstantKernel() * RBF() + WhiteKernel())
+        regression_model = GaussianProcessRegressor(ConstantKernel() * RBF() + WhiteKernel(), alpha=0)
     elif method == 'lgb':  # LightGBM
         import lightgbm as lgb
     
