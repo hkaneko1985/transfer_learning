@@ -21,7 +21,7 @@ warnings.filterwarnings('ignore')
 
 # spectra dataset 
 transfer_learning_flag = 0  # 0: transfer learning, 1: using only target data, 2: using both supporting data and target data
-regression_methods = ['pls']
+regression_methods = ['gp']
 #regression_methods = ['pls', 'rr', 'lasso', 'en', 'lsvr', 'nsvr', 'dt', 'rf', 'gp', 'lgb', 'xgb', 'gbdt']
 #number_of_test_samples = 50
 number_of_test_samples = 64
@@ -62,59 +62,46 @@ x_target = raw_data_with_y_target_arr[:, 1:]
 
 x_train_target, x_test_target, y_train_target, y_test = train_test_split(x_target, y_target, test_size=number_of_test_samples, random_state=0)
 
+# autoscaling
+if do_autoscaling:
+    autoscaled_x_train_target = (x_train_target - x_train_target.mean(axis=0)) / x_train_target.std(axis=0, ddof=1)
+    autoscaled_x_supporting_1 = (x_supporting_1 - x_supporting_1.mean(axis=0)) / x_supporting_1.std(axis=0, ddof=1)
+    autoscaled_x_supporting_2 = (x_supporting_2 - x_supporting_2.mean(axis=0)) / x_supporting_2.std(axis=0, ddof=1)
+    autoscaled_x_test_target = (x_test_target - x_train_target.mean(axis=0)) / x_train_target.std(axis=0, ddof=1)
+else:
+    autoscaled_x_train_target = x_train_target.copy()
+    autoscaled_x_supporting_1 = x_supporting_1.copy()
+    autoscaled_x_supporting_2 = x_supporting_2.copy()
+    autoscaled_x_test_target = x_test_target.copy()
+    
 if transfer_learning_flag == 1:
-    x_train = x_train_target.copy()
-    x_test = x_test_target.copy()
+    autoscaled_x_train = autoscaled_x_train_target.copy()
+    autoscaled_x_test = autoscaled_x_test_target.copy()
     y_train = y_train_target.copy()
 elif transfer_learning_flag == 2:
-    x_train = np.r_[x_supporting_1, x_supporting_2, x_train_target]
-    x_test = x_test_target.copy()
+    autoscaled_x_train = np.r_[autoscaled_x_supporting_1, autoscaled_x_supporting_2, autoscaled_x_train_target]
+    autoscaled_x_test = autoscaled_x_test_target.copy()
     y_train = np.r_[y_supporting_1, y_supporting_2, y_train_target]
 elif transfer_learning_flag == 0:
-    x_supporting_1_arranged = np.c_[x_supporting_1, x_supporting_1, np.zeros(x_supporting_1.shape), np.zeros(x_supporting_1.shape)]
-    x_supporting_2_arranged = np.c_[x_supporting_2, np.zeros(x_supporting_2.shape), x_supporting_2, np.zeros(x_supporting_2.shape)]
-    x_train_target_arranged = np.c_[x_train_target, np.zeros(x_train_target.shape), np.zeros(x_train_target.shape), x_train_target]
-    x_train = np.r_[x_supporting_1_arranged, x_supporting_2_arranged, x_train_target_arranged]
-    x_test = np.c_[x_test_target, np.zeros(x_test_target.shape), np.zeros(x_test_target.shape), x_test_target]
+    x_supporting_1_arranged = np.c_[autoscaled_x_supporting_1, autoscaled_x_supporting_1, np.zeros(autoscaled_x_supporting_1.shape), np.zeros(autoscaled_x_supporting_1.shape)]
+    x_supporting_2_arranged = np.c_[autoscaled_x_supporting_2, np.zeros(autoscaled_x_supporting_2.shape), autoscaled_x_supporting_2, np.zeros(autoscaled_x_supporting_2.shape)]
+    x_train_target_arranged = np.c_[autoscaled_x_train_target, np.zeros(autoscaled_x_train_target.shape), np.zeros(autoscaled_x_train_target.shape), autoscaled_x_train_target]
+    autoscaled_x_train = np.r_[x_supporting_1_arranged, x_supporting_2_arranged, x_train_target_arranged]
+    autoscaled_x_test = np.c_[autoscaled_x_test_target, np.zeros(autoscaled_x_test_target.shape), np.zeros(autoscaled_x_test_target.shape), autoscaled_x_test_target]
     y_train = np.r_[y_supporting_1, y_supporting_2, y_train_target]
 
 fold_number = min(fold_number, len(y_train))
 
 y_train = pd.Series(y_train)
 y_test = pd.Series(y_test)
-x_train = pd.DataFrame(x_train)
-x_test = pd.DataFrame(x_test)
-# delete descriptors with high rate of the same values
-rate_of_same_value = list()
-num = 0
-for X_variable_name in x_train.columns:
-    num += 1
-#    print('{0} / {1}'.format(num, x_train.shape[1]))
-    same_value_number = x_train[X_variable_name].value_counts()
-    rate_of_same_value.append(float(same_value_number[same_value_number.index[0]] / x_train.shape[0]))
-deleting_variable_numbers = np.where(np.array(rate_of_same_value) >= threshold_of_rate_of_same_value)
-
-"""
-# delete descriptors with zero variance
-deleting_variable_numbers = np.where( raw_Xtrain.var() == 0 )
-"""
-
-if len(deleting_variable_numbers[0]) != 0:
-    x_train = x_train.drop(x_train.columns[deleting_variable_numbers], axis=1)
-    x_test = x_test.drop(x_test.columns[deleting_variable_numbers], axis=1)
-    print('Variable numbers zero variance: {0}'.format(deleting_variable_numbers[0] + 1))
-
-print('# of X-variables: {0}'.format(x_train.shape[1]))
+autoscaled_x_train = pd.DataFrame(autoscaled_x_train)
+autoscaled_x_test = pd.DataFrame(autoscaled_x_test)
 
 # autoscaling
 if do_autoscaling:
-    autoscaled_x_train = (x_train - x_train.mean(axis=0)) / x_train.std(axis=0, ddof=1)
     autoscaled_y_train = (y_train - y_train.mean()) / y_train.std(ddof=1)
-    autoscaled_x_test = (x_test - x_train.mean(axis=0)) / x_train.std(axis=0, ddof=1)
 else:
-    autoscaled_x_train = x_train.copy()
     autoscaled_y_train = y_train.copy()
-    autoscaled_x_test = x_test.copy()
 
 plt.rcParams['font.size'] = 18  # 横軸や縦軸の名前の文字などのフォントのサイズ
 for method in regression_methods:

@@ -19,17 +19,19 @@ from sklearn.gaussian_process.kernels import WhiteKernel, RBF, ConstantKernel
 import warnings
 warnings.filterwarnings('ignore')
 
-# spectra dataset 
+dataset_flag = 3  # 0: linear simulation dataset 1, 1: linear simulation dataset 2, 2: nonlinear simulation dataset, 3: spectra dataset
 transfer_learning_flag = 0  # 0: transfer learning, 1: using only target data, 2: using both supporting data and target data
-regression_methods = ['pls']
+regression_methods = ['gp']
 #regression_methods = ['pls', 'rr', 'lasso', 'en', 'lsvr', 'nsvr', 'dt', 'rf', 'gp', 'lgb', 'xgb', 'gbdt']
-#number_of_test_samples = 50
-number_of_test_samples = 64
+#number_of_test_samples = 100
+number_of_test_samples = 50
 
+number_of_supporting_samples_in_simulation = 100
+number_of_target_samples_in_simulation = 103
 noise_ratio_in_simulation = 0.1
 do_autoscaling = True  # True or False
 threshold_of_rate_of_same_value = 0.99
-fold_number = 10
+fold_number = 5
 max_pls_component_number = 30
 ridge_lambdas = 2 ** np.arange(-5, 10, dtype=float)  # L2 weight in ridge regression
 lasso_lambdas = np.arange(0.01, 0.71, 0.01, dtype=float)  # L1 weight in LASSO
@@ -43,85 +45,88 @@ nonlinear_svr_gammas = 2 ** np.arange(-20, 10, dtype=float)  # Gamma for nonline
 random_forest_number_of_trees = 300  # Number of decision trees for random forest
 random_forest_x_variables_rates = np.arange(1, 10,
                                             dtype=float) / 10  # Ratio of the number of X-variables for random forest
+ 
                                             
-# load data set
-raw_data_with_y_supporting_1 = pd.read_csv('shootout_2012_laboratory_scale.csv', encoding='SHIFT-JIS', index_col=0)
-raw_data_with_y_supporting_2 = pd.read_csv('shootout_2012_pilot_scale.csv', encoding='SHIFT-JIS', index_col=0)
-raw_data_with_y_target = pd.read_csv('shootout_2012_full_scale.csv', encoding='SHIFT-JIS', index_col=0)
-
-raw_data_with_y_supporting_1_arr = np.array(raw_data_with_y_supporting_1)
-raw_data_with_y_supporting_2_arr = np.array(raw_data_with_y_supporting_2)
-raw_data_with_y_target_arr = np.array(raw_data_with_y_target)
-
-y_supporting_1 = raw_data_with_y_supporting_1_arr[:, 0]
-x_supporting_1 = raw_data_with_y_supporting_1_arr[:, 1:]
-y_supporting_2 = raw_data_with_y_supporting_2_arr[:, 0]
-x_supporting_2 = raw_data_with_y_supporting_2_arr[:, 1:]
-y_target = raw_data_with_y_target_arr[:, 0]
-x_target = raw_data_with_y_target_arr[:, 1:]
-
+np.random.seed(0)                                                    
+if dataset_flag == 0:
+    x_supporting = np.random.rand(number_of_supporting_samples_in_simulation, 2)
+    y_supporting = 2 * x_supporting[:, 0] + 3 * x_supporting[:, 1] + 1
+    y_supporting = y_supporting + noise_ratio_in_simulation * y_supporting.std() * np.random.rand(len(y_supporting))
+    x_target = np.random.rand(number_of_target_samples_in_simulation, 2)
+    y_target = 2 * x_target[:, 0] + 3 * x_target[:, 1] + 2
+    y_target = y_target + noise_ratio_in_simulation * y_target.std() * np.random.rand(len(y_target))
+if dataset_flag == 1:
+    x_supporting = np.random.rand(number_of_supporting_samples_in_simulation, 2)
+    y_supporting = 2 * x_supporting[:, 0] + 3 * x_supporting[:, 1] + 1
+    y_supporting = y_supporting + noise_ratio_in_simulation * y_supporting.std() * np.random.rand(len(y_supporting))
+    x_target = np.random.rand(number_of_target_samples_in_simulation, 2)
+    y_target = 2 * x_target[:, 0] + 4 * x_target[:, 1] + 1
+    y_target = y_target + noise_ratio_in_simulation * y_target.std() * np.random.rand(len(y_target))
+elif dataset_flag == 2:
+    x_supporting = np.random.rand(number_of_supporting_samples_in_simulation, 2)
+    y_supporting = 2 * (x_supporting[:, 0] - 2) ** 3 + 3 * x_supporting[:, 1] ** 2 + 1
+    y_supporting = y_supporting + noise_ratio_in_simulation * y_supporting.std() * np.random.rand(len(y_supporting))
+    x_target = np.random.rand(number_of_target_samples_in_simulation, 2)
+    y_target = 2 * (x_target[:, 0] - 2) ** 3 + 3 * x_target[:, 1] ** 2 + 3
+    y_target = y_target + noise_ratio_in_simulation * y_target.std() * np.random.rand(len(y_target))
+elif dataset_flag == 3:
+    # load data set
+    raw_data_with_y_supporting = pd.read_csv('shootout_2012_pilot_scale.csv', encoding='SHIFT-JIS', index_col=0)
+    raw_data_with_y_target = pd.read_csv('shootout_2012_full_scale.csv', encoding='SHIFT-JIS', index_col=0)
+        
+    raw_data_with_y_supporting_arr = np.array(raw_data_with_y_supporting)
+    raw_data_with_y_target_arr = np.array(raw_data_with_y_target)
+    
+    y_supporting = raw_data_with_y_supporting_arr[:, 0]
+    x_supporting = raw_data_with_y_supporting_arr[:, 1:]
+    y_target = raw_data_with_y_target_arr[:, 0]
+    x_target = raw_data_with_y_target_arr[:, 1:]
+np.random.seed()
 x_train_target, x_test_target, y_train_target, y_test = train_test_split(x_target, y_target, test_size=number_of_test_samples, random_state=0)
 
+# autoscaling
+if do_autoscaling:
+    autoscaled_x_train_target = (x_train_target - x_train_target.mean(axis=0)) / x_train_target.std(axis=0, ddof=1)
+    autoscaled_x_supporting = (x_supporting - x_supporting.mean(axis=0)) / x_supporting.std(axis=0, ddof=1)
+    autoscaled_x_test_target = (x_test_target - x_train_target.mean(axis=0)) / x_train_target.std(axis=0, ddof=1)
+else:
+    autoscaled_x_train_target = x_train_target.copy()
+    autoscaled_x_supporting = x_supporting.copy()
+    autoscaled_x_test_target = x_test_target.copy()
+
 if transfer_learning_flag == 1:
-    x_train = x_train_target.copy()
-    x_test = x_test_target.copy()
+    autoscaled_x_train = autoscaled_x_train_target.copy()
+    autoscaled_x_test = autoscaled_x_test_target.copy()
     y_train = y_train_target.copy()
 elif transfer_learning_flag == 2:
-    x_train = np.r_[x_supporting_1, x_supporting_2, x_train_target]
-    x_test = x_test_target.copy()
-    y_train = np.r_[y_supporting_1, y_supporting_2, y_train_target]
+    autoscaled_x_train = np.r_[autoscaled_x_supporting, autoscaled_x_train_target]
+    autoscaled_x_test = autoscaled_x_test_target.copy()
+    y_train = np.r_[y_supporting, y_train_target]
 elif transfer_learning_flag == 0:
-    x_supporting_1_arranged = np.c_[x_supporting_1, x_supporting_1, np.zeros(x_supporting_1.shape), np.zeros(x_supporting_1.shape)]
-    x_supporting_2_arranged = np.c_[x_supporting_2, np.zeros(x_supporting_2.shape), x_supporting_2, np.zeros(x_supporting_2.shape)]
-    x_train_target_arranged = np.c_[x_train_target, np.zeros(x_train_target.shape), np.zeros(x_train_target.shape), x_train_target]
-    x_train = np.r_[x_supporting_1_arranged, x_supporting_2_arranged, x_train_target_arranged]
-    x_test = np.c_[x_test_target, np.zeros(x_test_target.shape), np.zeros(x_test_target.shape), x_test_target]
-    y_train = np.r_[y_supporting_1, y_supporting_2, y_train_target]
+    x_supporting_arranged = np.c_[autoscaled_x_supporting, autoscaled_x_supporting, np.zeros(autoscaled_x_supporting.shape)]
+    x_train_target_arranged = np.c_[autoscaled_x_train_target, np.zeros(autoscaled_x_train_target.shape), autoscaled_x_train_target]
+    autoscaled_x_train = np.r_[x_supporting_arranged, x_train_target_arranged]
+    autoscaled_x_test = np.c_[autoscaled_x_test_target, np.zeros(autoscaled_x_test_target.shape), autoscaled_x_test_target]
+    y_train = np.r_[y_supporting, y_train_target]
 
 fold_number = min(fold_number, len(y_train))
 
 y_train = pd.Series(y_train)
 y_test = pd.Series(y_test)
-x_train = pd.DataFrame(x_train)
-x_test = pd.DataFrame(x_test)
-# delete descriptors with high rate of the same values
-rate_of_same_value = list()
-num = 0
-for X_variable_name in x_train.columns:
-    num += 1
-#    print('{0} / {1}'.format(num, x_train.shape[1]))
-    same_value_number = x_train[X_variable_name].value_counts()
-    rate_of_same_value.append(float(same_value_number[same_value_number.index[0]] / x_train.shape[0]))
-deleting_variable_numbers = np.where(np.array(rate_of_same_value) >= threshold_of_rate_of_same_value)
-
-"""
-# delete descriptors with zero variance
-deleting_variable_numbers = np.where( raw_Xtrain.var() == 0 )
-"""
-
-if len(deleting_variable_numbers[0]) != 0:
-    x_train = x_train.drop(x_train.columns[deleting_variable_numbers], axis=1)
-    x_test = x_test.drop(x_test.columns[deleting_variable_numbers], axis=1)
-    print('Variable numbers zero variance: {0}'.format(deleting_variable_numbers[0] + 1))
-
-print('# of X-variables: {0}'.format(x_train.shape[1]))
+autoscaled_x_train = pd.DataFrame(autoscaled_x_train)
+autoscaled_x_test = pd.DataFrame(autoscaled_x_test)
 
 # autoscaling
 if do_autoscaling:
-    autoscaled_x_train = (x_train - x_train.mean(axis=0)) / x_train.std(axis=0, ddof=1)
     autoscaled_y_train = (y_train - y_train.mean()) / y_train.std(ddof=1)
-    autoscaled_x_test = (x_test - x_train.mean(axis=0)) / x_train.std(axis=0, ddof=1)
 else:
-    autoscaled_x_train = x_train.copy()
     autoscaled_y_train = y_train.copy()
-    autoscaled_x_test = x_test.copy()
 
 plt.rcParams['font.size'] = 18  # 横軸や縦軸の名前の文字などのフォントのサイズ
 for method in regression_methods:
     print(method)
     if method == 'pls':  # Partial Least Squares
         pls_components = np.arange(1, min(np.linalg.matrix_rank(autoscaled_x_train) + 1, max_pls_component_number + 1), 1)
-#        pls_components = np.arange(1, 10)
         r2all = list()
         r2cvall = list()
         for pls_component in pls_components:
